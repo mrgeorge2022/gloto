@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unirse a Gloto | Registro Profesional</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body { background: #050505; color: white; font-family: 'Plus Jakarta Sans', sans-serif; overflow-x: hidden; }
+        .gloto-input { background: #121212; border: 1px solid #333; padding: 12px; border-radius: 12px; width: 100%; outline: none; font-size: 13px; color: white; transition: all 0.3s; }
+        .gloto-input:focus { border-color: #CCFF00; box-shadow: 0 0 10px rgba(204, 255, 0, 0.2); }
+        .step { display: none; }
+        .step.active { display: block; animation: fadeIn 0.5s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        #mini-map-container { position: relative; height: 250px; border-radius: 20px; overflow: hidden; margin-bottom: 15px; border: 1px solid #333; }
+        #mini-map { height: 100%; width: 100%; }
+        .leaflet-layer { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%); }
+        
+        /* Puntero Fijo Central */
+        .map-pointer { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -100%); z-index: 1000; pointer-events: none; color: #CCFF00; font-size: 32px; text-shadow: 0 2px 5px rgba(0,0,0,0.5); }
+        
+        .loader { border: 3px solid #121212; border-top: 3px solid #CCFF00; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 10px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .full-map { position: fixed !important; top: 0; left: 0; width: 100vw !important; height: 100vh !important; z-index: 9999; border-radius: 0 !important; }
+        .error-msg { color: #ff4444; font-size: 10px; font-weight: bold; margin-top: -8px; margin-bottom: 10px; display: none; }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+
+    <div id="main-card" class="max-w-md w-full bg-[#121212] p-8 rounded-[2.5rem] border border-white/5 shadow-2xl relative overflow-hidden">
+        <h1 class="text-2xl font-black text-[#CCFF00] italic mb-6">GLOTO BIZ <span class="text-[10px] not-italic text-white/30 tracking-widest uppercase ml-2">Registro</span></h1>
+
+        <div id="paso1" class="step active">
+            <div class="relative">
+                <input type="text" id="reg-name" oninput="validateUnique('name')" placeholder="Nombre del Negocio" class="gloto-input mb-4">
+                <p id="error-name" class="error-msg text-right">Este nombre ya está registrado</p>
+            </div>
+
+            <div class="relative">
+                <input type="email" id="reg-email" oninput="validateUnique('email')" placeholder="Email de contacto" class="gloto-input mb-4">
+                <p id="error-email" class="error-msg text-right">Este correo ya está en uso</p>
+            </div>
+            
+            <div class="flex gap-2 mb-4">
+                <select id="reg-type" onchange="toggleOther('type')" class="gloto-input flex-1">
+                    <option value="">Selecciona Tipo</option>
+                </select>
+                <input type="text" id="reg-type-other" placeholder="¿Cuál?" class="gloto-input flex-1 hidden border-[#CCFF00]">
+            </div>
+
+            <div class="flex gap-2 mb-4">
+                <select id="reg-cat" onchange="toggleOther('cat')" class="gloto-input flex-1">
+                    <option value="">Categoría</option>
+                </select>
+                <input type="text" id="reg-cat-other" placeholder="¿Cuál?" class="gloto-input flex-1 hidden border-[#CCFF00]">
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 mb-4">
+                <select id="reg-time" class="gloto-input">
+                    <option value="">Tiempo Entrega</option>
+                    <option value="5-10 min">5-10 min</option>
+                    <option value="10-15 min">10-15 min</option>
+                    <option value="15-20 min">15-20 min</option>
+                    <option value="20-25 min">20-25 min</option>
+                    <option value="25-30 min">25-30 min</option>
+                </select>
+                <input type="text" id="reg-specialty" placeholder="Especialidad" class="gloto-input">
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 mb-4">
+                <div class="relative">
+                    <span class="absolute top-[-8px] left-2 bg-[#121212] px-1 text-[8px] text-white/40 font-bold uppercase">Apertura</span>
+                    <input type="time" id="reg-open" class="gloto-input">
+                </div>
+                <div class="relative">
+                    <span class="absolute top-[-8px] left-2 bg-[#121212] px-1 text-[8px] text-white/40 font-bold uppercase">Cierre</span>
+                    <input type="time" id="reg-close" class="gloto-input">
+                </div>
+            </div>
+
+            <div id="menu-container" class="space-y-2 mb-4">
+                <div class="flex gap-2">
+                    <input type="text" placeholder="Producto (ej: Pizza)" class="gloto-input menu-item !mb-0">
+                    <button onclick="addMenuField()" class="w-12 h-12 bg-white/5 rounded-xl border border-white/10 text-glotoNeon">+</button>
+                </div>
+            </div>
+
+            <div id="mini-map-container">
+                <div id="mini-map"></div>
+                <div class="map-pointer"><i class="fas fa-location-dot"></i></div>
+                <button onclick="toggleFullScreenMap()" class="absolute top-2 right-2 z-[1001] bg-black/60 p-2 rounded-lg text-white border border-white/10 text-xs">
+                    <i class="fas fa-expand"></i> Pantalla Completa
+                </button>
+            </div>
+
+            <button onclick="solicitarRegistro()" id="btn-envio" class="w-full bg-[#CCFF00] text-black font-black py-4 rounded-xl uppercase text-[10px] tracking-widest active:scale-95 flex items-center justify-center">
+                <span id="btn-text">Enviar Código de Verificación</span>
+            </button>
+        </div>
+
+        <div id="paso2" class="step text-center">
+            <div class="mb-6">
+                <i class="fas fa-paper-plane text-glotoNeon text-4xl mb-4"></i>
+                <h2 class="text-xl font-bold">Código Enviado</h2>
+                <p class="text-white/40 text-[10px] uppercase tracking-widest mt-2">Revisa tu bandeja de entrada</p>
+            </div>
+            <input type="text" id="reg-token" placeholder="000000" class="gloto-input text-center text-3xl tracking-[10px] font-bold py-6 mb-4">
+            <button onclick="verificarToken()" class="w-full bg-white text-black font-black py-4 rounded-xl uppercase text-[10px] tracking-widest active:scale-95">Activar Mi Negocio</button>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://script.google.com/macros/s/AKfycbyYfkQp0sa1h3zLepqP9zBXt7Rf4r-NqY_euO5g3s2R1tYsybozoRFFNPNIIHnDdxGp/exec';
+        let emailGuardado = "";
+        let map, markerCoords = { lat: 10.4236, lng: -75.5512 };
+        let businessList = [];
+
+        // Inicializar Datos y Mapa
+        async function init() {
+            try {
+                const res = await fetch(API_URL);
+                businessList = await res.json();
+                
+                // Llenar Selects
+                populateSelect('reg-type', [...new Set(businessList.map(b => b.type))]);
+                populateSelect('reg-cat', [...new Set(businessList.map(b => b.cat))]);
+
+                // Localización Inicial
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(pos => {
+                        markerCoords.lat = pos.coords.latitude;
+                        markerCoords.lng = pos.coords.longitude;
+                        setupMap();
+                    }, () => setupMap());
+                } else { setupMap(); }
+            } catch (e) { console.error("Error al iniciar", e); setupMap(); }
+        }
+
+        function setupMap() {
+            map = L.map('mini-map', { zoomControl: false }).setView([markerCoords.lat, markerCoords.lng], 15);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            
+            // Actualizar coordenadas al mover el mapa
+            map.on('move', () => {
+                const center = map.getCenter();
+                markerCoords.lat = center.lat;
+                markerCoords.lng = center.lng;
+            });
+        }
+
+        function populateSelect(id, items) {
+            const select = document.getElementById(id);
+            items.forEach(item => {
+                const op = document.createElement('option');
+                op.value = item; op.textContent = item;
+                select.appendChild(op);
+            });
+            const other = document.createElement('option');
+            other.value = "OTRO"; other.textContent = "+ OTRO (REGISTRAR NUEVO)";
+            select.appendChild(other);
+        }
+
+        function toggleOther(field) {
+            const select = document.getElementById(`reg-${field}`);
+            const input = document.getElementById(`reg-${field}-other`);
+            input.classList.toggle('hidden', select.value !== "OTRO");
+        }
+
+        function addMenuField() {
+            const div = document.createElement('div');
+            div.className = "flex gap-2 animate-fadeIn";
+            div.innerHTML = `<input type="text" placeholder="Otro producto" class="gloto-input menu-item !mb-0"><button onclick="this.parentElement.remove()" class="w-12 h-12 bg-red-500/10 rounded-xl border border-red-500/20 text-red-500">×</button>`;
+            document.getElementById('menu-container').appendChild(div);
+        }
+
+        function toggleFullScreenMap() {
+            const container = document.getElementById('mini-map-container');
+            container.classList.toggle('full-map');
+            setTimeout(() => map.invalidateSize(), 400);
+        }
+
+        // VALIDACIONES
+// VALIDACIONES MEJORADAS PARA EVITAR ERRORES CON CELDAS VACÍAS
+function validateUnique(field) {
+    const inputElement = document.getElementById(`reg-${field}`);
+    const errorElement = document.getElementById(`error-${field}`);
+    
+    // Si no hay datos cargados aún, no validar
+    if (!inputElement || !businessList || businessList.length === 0) return true;
+
+    const val = inputElement.value.toLowerCase().trim();
+    
+    if (val === "") {
+        errorElement.style.display = "none";
+        return true;
+    }
+
+    // Buscamos duplicados asegurándonos de que el valor en la BD no sea nulo
+    const exists = businessList.some(b => {
+        const dbValue = b[field]; 
+        // Si dbValue existe, comparamos; si es undefined/null, ignoramos esa fila
+        return dbValue ? dbValue.toString().toLowerCase() === val : false;
+    });
+
+    errorElement.style.display = exists ? "block" : "none";
+    
+    // Cambiar color del borde si hay error
+    inputElement.style.borderColor = exists ? "#ff4444" : "";
+    
+    return !exists;
+}
+        async function solicitarRegistro() {
+            if (!validateUnique('name') || !validateUnique('email')) return alert("Por favor corrige los datos duplicados");
+            
+            const btn = document.getElementById('btn-envio');
+            btn.disabled = true;
+            btn.innerHTML = `<div class="loader"></div> PROCESANDO...`;
+
+            // Procesar Menú
+            const menu = Array.from(document.querySelectorAll('.menu-item'))
+                              .map(i => i.value)
+                              .filter(v => v !== "")
+                              .join(", ");
+
+            // Obtener Tipo/Categoría real
+            const type = document.getElementById('reg-type').value === "OTRO" ? document.getElementById('reg-type-other').value : document.getElementById('reg-type').value;
+            const cat = document.getElementById('reg-cat').value === "OTRO" ? document.getElementById('reg-cat-other').value : document.getElementById('reg-cat').value;
+
+            const datos = {
+                action: "solicitar_registro",
+                name: document.getElementById('reg-name').value,
+                email: document.getElementById('reg-email').value,
+                type: type.toUpperCase(),
+                cat: cat,
+                time: document.getElementById('reg-time').value,
+                specialty: document.getElementById('reg-specialty').value,
+                hours: `${document.getElementById('reg-open').value} - ${document.getElementById('reg-close').value}`,
+                products: menu,
+                lat: markerCoords.lat,
+                lng: markerCoords.lng
+            };
+
+            emailGuardado = datos.email;
+
+            try {
+                const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify(datos) });
+                const r = await res.json();
+                if (r.status === "token_enviado") {
+                    document.getElementById('paso1').classList.remove('active');
+                    document.getElementById('paso2').classList.add('active');
+                }
+            } catch (e) {
+                alert("Error al conectar con el servidor");
+                btn.disabled = false;
+                btn.innerText = "Enviar Código de Verificación";
+            }
+        }
+
+        async function verificarToken() {
+            const token = document.getElementById('reg-token').value;
+            const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: "verificar_token", email: emailGuardado, token }) });
+            const r = await res.json();
+            if (r.status === "exito") window.location.href = "index.html";
+            else alert("Código incorrecto");
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
