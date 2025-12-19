@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gloto | Plaza Digital</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { glotoNeon: '#CCFF00', glotoSpace: '#050505', glotoDark: '#121212' },
+                    borderRadius: { '4xl': '2rem', '5xl': '3rem' }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Unbounded:wght@400;900&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
+        body, html { height: 100%; margin: 0; font-family: 'Plus Jakarta Sans', sans-serif; background-color: #050505; color: white; overflow: hidden; }
+        .font-logo { font-family: 'Unbounded', sans-serif; }
+        
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; z-index: 1; opacity: 0; transition: opacity 1s ease; }
+        #map.loaded { opacity: 1; }
+        .leaflet-layer { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%); }
+        
+        /* loader removed: page will start directly on map */
+
+        #results-panel, #quick-view {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: rgba(5, 5, 5, 0.98); backdrop-blur: 20px;
+            border-top: 2px solid rgba(204, 255, 0, 0.3);
+            transform: translateY(110%);
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            max-width: 600px; margin: 0 auto;
+        }
+
+        #results-panel { height: 38vh; z-index: 500; border-radius: 3rem 3rem 0 0; padding: 1.5rem; }
+        #quick-view { z-index: 1000; border-radius: 3rem 3rem 0 0; padding: 2rem; max-height: 100vh; overflow-y: auto; }
+
+        .open { transform: translateY(0) !important; }
+
+        .custom-marker { width: 18px; height: 18px; background: #CCFF00; border: 3px solid #050505; border-radius: 50%; box-shadow: 0 0 15px #CCFF00; cursor: pointer; }
+        .user-marker { width: 22px; height: 22px; background: #00F0FF; border: 3px solid white; border-radius: 50%; box-shadow: 0 0 20px #00F0FF; }
+        input[type=range] { accent-color: #CCFF00; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+
+        .cat-active { background-color: #CCFF00 !important; color: #050505 !important; border-color: #CCFF00 !important; font-weight: 900 !important; }
+        
+        .btn-spinner {
+            display: inline-block; width: 18px; height: 18px; border: 3px solid rgba(204, 255, 0, 0.2); border-top-color: #000000; border-radius: 50%; animation: spin 1s linear infinite;
+            vertical-align: middle;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .panel-expand-btn { width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: 9999px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.04); color: #ffffff; }
+        .panel-expand-btn:hover { background: rgba(204,255,0,0.06); color: #CCFF00; }
+
+        /* Fullscreen style for panels */
+        .fullscreen-panel {
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            max-width: none !important;
+            border-radius: 0 !important;
+            z-index: 4000 !important;
+            overflow: auto !important;
+            padding: 1.5rem !important;
+        }
+        /* Results list/grid styles */
+        #results-list.results-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+        #results-list.results-list { display: flex; flex-direction: column; gap: 0.75rem; }
+        @media (max-width: 900px) {
+            #results-list.results-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+        }
+        @media (max-width: 640px) {
+            /* Use two columns on small screens so tiles are smaller (like dados) */
+            #results-list.results-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 0.5rem; }
+        }
+        /* Make grid tiles square like "dados" on mobile */
+        #results-list.results-grid > div {
+            aspect-ratio: 1 / 1;
+            overflow: hidden;
+            border-radius: 1rem;
+            display: flex;
+            flex-direction: column;
+            background: #0b0b0b;
+        }
+        #results-list.results-grid > div .grid-img { flex: 0.65 1 0%; width: 100%; }
+        #results-list.results-grid > div .grid-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        #results-list.results-grid > div .grid-img .overlay {
+            position: absolute; left: 0; right: 0; bottom: 0; padding: 0.5rem; background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.6) 100%); color: #fff;
+            display: flex; flex-direction: column; gap: 0.15rem; z-index: 3;
+        }
+        #results-list.results-grid > div .grid-img .overlay p { margin: 0; font-size: 12px; font-weight: 700; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+        #results-list.results-grid > div .grid-meta { flex: 0.35 1 0%; padding: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem; }
+        #results-list.results-grid > div .grid-meta p { margin: 0; font-size: 11px; line-height: 1.1; }
+        #results-list.results-grid > div .grid-meta .products { font-size: 10px; color: rgba(255,255,255,0.7); overflow: auto; max-height: 3.6rem; }
+        /* Ensure panels and lists scroll when content overflows */
+        #results-panel { overflow: visible; }
+        /* preview (not fullscreen) behavior: vertical scroll inside results list */
+        #results-panel:not(.fullscreen-panel) #results-list {
+            overflow-y: auto; -webkit-overflow-scrolling: touch; max-height: calc(34vh); padding-right: 0.25rem;
+        }
+        /* When panel is fullscreen reserve space for header/footer */
+        #results-panel.fullscreen-panel #results-list { max-height: calc(100vh - 140px); }
+        /* Quick view: preview (not fullscreen) show vertical scroll */
+        #quick-view:not(.fullscreen-panel) #qv-content { max-height: calc(60vh); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+        /* Quick view fullscreen behavior */
+        #quick-view.fullscreen-panel #qv-content { max-height: calc(100vh - 140px); overflow-y: auto; }
+        
+        .star-rating-interactive { color: #333; cursor: pointer; transition: all 0.2s ease; font-size: 1.8rem; }
+        .star-rating-interactive.hovered, .star-rating-interactive.active { color: #CCFF00; text-shadow: 0 0 10px rgba(204, 255, 0, 0.4); }
+        .rating-disabled { pointer-events: none; }
+    </style>
+</head>
+<body>
+
+    <!-- bienvenida removed: auto-entering the plaza -->
+
+    <div id="map"></div>
+
+    <div class="relative z-10 pointer-events-none h-full flex flex-col p-4 md:p-8">
+        <header class="pointer-events-auto w-full max-w-2xl mx-auto space-y-4">
+            <div class="flex items-center bg-glotoDark/90 backdrop-blur-xl p-4 rounded-3xl border border-white/10 shadow-2xl">
+                <h1 class="font-logo text-2xl text-glotoNeon mr-4 leading-none ">G</h1>
+                <input type="text" id="search-input" onkeyup="searchBiz()" placeholder="¿Qué buscas?" class="bg-transparent flex-1 outline-none text-sm font-bold text-white placeholder-white/20">
+                <button onclick="toggleFiltersModal()" class="ml-2 bg-glotoNeon text-black p-3 rounded-2xl active:scale-90 transition-all">
+                    <i class="fas fa-sliders-h"></i>
+                </button>
+            </div>
+            <div class="flex gap-2 overflow-x-auto no-scrollbar" id="filters-container"></div>
+        </header>
+
+        <div class="mt-auto flex justify-between items-end pointer-events-auto pb-10">
+            <a href="unirse.html" class="bg-glotoDark border border-glotoNeon/30 text-white px-5 py-4 rounded-2xl shadow-2xl flex items-center gap-3 active:scale-95 transition-all group">
+                <div class="w-8 h-8 bg-glotoNeon rounded-lg flex items-center justify-center text-black">
+                    <i class="fas fa-store text-sm"></i>
+                </div>
+                <div class="text-left">
+                    <p class="text-[8px] text-white/40 uppercase font-black leading-none">Socio Gloto</p>
+                    <p class="text-[10px] font-bold uppercase tracking-tighter">Unir mi Negocio</p>
+                </div>
+            </a>
+
+            <button onclick="locateUser()" class="w-14 h-14 bg-glotoDark border border-glotoNeon/50 text-glotoNeon rounded-2xl shadow-2xl flex items-center justify-center active:scale-90 transition-all">
+                <i class="fas fa-location-arrow text-xl"></i>
+            </button>
+        </div>
+    </div>
+
+    <div id="advanced-filters-modal" class="fixed inset-0 bg-glotoSpace/95 backdrop-blur-2xl z-[2000] hidden flex items-center justify-center p-6">
+        <div class="bg-glotoDark border border-white/10 w-full max-w-md rounded-[3rem] p-8">
+            <div class="flex justify-between items-center mb-10">
+                <h2 class="font-logo text-glotoNeon text-xl uppercase ">Filtros</h2>
+                <button onclick="closeAllPanels()" class="text-white/40 text-3xl">&times;</button>
+            </div>
+            <div class="space-y-6">
+                <div>
+                    <div class="flex justify-between mb-4">
+                        <p class="text-[10px] text-white/40 uppercase font-black">Radar de Distancia</p>
+                        <span id="dist-val" class="text-glotoNeon font-bold">Sin límite</span>
+                    </div>
+                    <input type="range" id="range-distance" min="0" max="15000" step="500" value="0" onchange="applyProximityFilter()" class="w-full cursor-pointer">
+                </div>
+                <div class="grid grid-cols-1 gap-3">
+                    <button onclick="applySort('new')" class="bg-white/5 p-5 rounded-2xl text-[10px] font-black uppercase text-left flex justify-between items-center border border-white/5 hover:border-glotoNeon">✨ Nuevos <span>Menos de 30 días</span></button>
+                    <button onclick="applySort('top')" class="bg-white/5 p-5 rounded-2xl text-[10px] font-black uppercase text-left flex justify-between items-center border border-white/5 hover:border-glotoNeon">🏆 Mejor Valorados <span>Rating</span></button>
+                    <button onclick="applySort('fast')" class="bg-white/5 p-5 rounded-2xl text-[10px] font-black uppercase text-left flex justify-between items-center border border-white/5 hover:border-glotoNeon">⚡ Más Rápido <span>Tiempo</span></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="results-panel">
+        <div class="flex justify-between items-center mb-6 px-2">
+            <div>
+                <h3 id="panel-title" class="font-logo text-glotoNeon text-xs uppercase tracking-widest ">Resultados</h3>
+            </div>
+            <div class="flex items-center gap-2">
+    <button onclick="toggleResultsView(this)" id="view-toggle-btn" class="panel-expand-btn"><i class="fas fa-list"></i></button>
+    <button onclick="togglePanelFullscreen('results-panel', this)" class="panel-expand-btn"><i class="fas fa-expand"></i></button>
+    <button onclick="closeResults()" class="panel-expand-btn"><i class="fas fa-times"></i></button>
+</div>
+        </div>
+        <div id="results-list" class="flex gap-4 overflow-x-auto no-scrollbar pb-6 px-2"></div>
+    </div>
+
+    <div id="quick-view">
+<div class="flex justify-end gap-2 px-4 pt-4">
+    <button onclick="togglePanelFullscreen('quick-view', this)" class="panel-expand-btn" title="Pantalla completa">
+        <i class="fas fa-expand"></i>
+    </button>
+    <button onclick="closeQuickView()" class="panel-expand-btn" title="Cerrar">
+        <i class="fas fa-times"></i>
+    </button>
+</div>
+        <div id="qv-content"></div>
+        <div class="flex gap-4 mt-6">
+            <a id="qv-link" href="#" target="_blank" class="flex-[2] bg-glotoNeon text-black py-5 rounded-2xl font-black uppercase text-[10px] text-center font-bold">VER TIENDA</a>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://script.google.com/macros/s/AKfycbyYfkQp0sa1h3zLepqP9zBXt7Rf4r-NqY_euO5g3s2R1tYsybozoRFFNPNIIHnDdxGp/exec'; 
+        let map, userMarker, proximityCircle, userCoords = null;
+        let businessData = [];
+        let activeMarkers = [];
+
+        function closeAllPanels() {
+            document.getElementById('results-panel').classList.remove('open');
+            document.getElementById('quick-view').classList.remove('open');
+            document.getElementById('advanced-filters-modal').classList.add('hidden');
+        }
+
+        function enterPlaza() {
+            const btn = document.getElementById('btn-start');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span><span style="margin-left:12px;">CARGANDO...</span>';
+            setTimeout(() => requestLocationAndStart(), 900);
+        }
+
+        async function requestLocationAndStart() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(async (pos) => {
+                    userCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                    initMap();
+                    await cargarNegocios();
+                    const loader = document.getElementById('loader-gloto');
+                    if (loader) {
+                        loader.style.opacity = '0';
+                        setTimeout(() => { loader.style.display = 'none'; }, 600);
+                    }
+                }, () => alert("Se requiere ubicación para entrar a la plaza."));
+            }
+        }
+
+        function initMap() {
+            map = L.map('map', { zoomControl: false }).setView([userCoords.lat, userCoords.lng], 14);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            userMarker = L.marker([userCoords.lat, userCoords.lng], { icon: L.divIcon({ className: 'user-marker' }) }).addTo(map);
+            proximityCircle = L.circle([userCoords.lat, userCoords.lng], {
+                radius: 0, color: '#CCFF00', fillColor: '#CCFF00', fillOpacity: 0.1, weight: 1, dashArray: '5, 10'
+            }).addTo(map);
+            document.getElementById('map').classList.add('loaded');
+        }
+
+        async function cargarNegocios() {
+            try {
+                const res = await fetch(API_URL);
+                businessData = await res.json();
+                renderMarkers(businessData);
+                renderQuickFilters();
+            } catch(e) { console.error("Error al cargar negocios", e); }
+        }
+
+        function renderQuickFilters() {
+            const container = document.getElementById('filters-container');
+            const cats = [...new Set(businessData.map(b => b.type))].filter(t => t);
+            container.innerHTML = `<button id="cat-all" onclick="selectCategory('all')" class="bg-glotoDark border border-white/10 text-white/50 px-6 py-2 rounded-full text-[10px] font-black uppercase whitespace-nowrap pointer-events-auto cat-btn cat-active">Todos</button>`;
+            cats.forEach(c => {
+                const btn = document.createElement('button');
+                btn.className = "bg-glotoDark border border-white/10 text-white/50 px-6 py-2 rounded-full text-[10px] font-black uppercase whitespace-nowrap pointer-events-auto cat-btn";
+                btn.innerText = c;
+                btn.onclick = () => selectCategory(c, btn);
+                container.appendChild(btn);
+            });
+        }
+
+        function selectCategory(cat, btnElement) {
+            closeAllPanels();
+            document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('cat-active'));
+            if(cat === 'all') document.getElementById('cat-all').classList.add('cat-active');
+            else btnElement.classList.add('cat-active');
+
+            const filtered = cat === 'all' ? businessData : businessData.filter(b => b.type === cat);
+            renderMarkers(filtered);
+            if(cat !== 'all') showInPanel(filtered, cat);
+        }
+
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3;
+            const dLat = (lat2-lat1) * Math.PI/180;
+            const dLon = (lon2-lon1) * Math.PI/180;
+            const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        function isNew(dateStr) {
+            if(!dateStr) return false;
+            const businessDate = new Date(dateStr);
+            const today = new Date();
+            const diffInDays = Math.floor((today - businessDate) / (1000 * 60 * 60 * 24));
+            return diffInDays >= 0 && diffInDays <= 30;
+        }
+
+        // Nueva función para filtrar por cercanía al ajustar el radar
+        function applyProximityFilter() {
+            const maxDist = parseInt(document.getElementById('range-distance').value);
+            if(maxDist > 0) {
+                const filtered = businessData.filter(b => getDistance(userCoords.lat, userCoords.lng, b.lat, b.lng) <= maxDist);
+                closeAllPanels();
+                renderMarkers(filtered);
+                showInPanel(filtered, `Dentro de ${maxDist >= 1000 ? (maxDist/1000).toFixed(1) + 'km' : maxDist + 'm'}`);
+                map.setView([userCoords.lat, userCoords.lng], map.getZoom());
+            } else {
+                renderMarkers(businessData);
+                closeResults();
+            }
+        }
+
+        function applySort(mode) {
+            closeAllPanels();
+            let filtered = [...businessData];
+            const maxDist = parseInt(document.getElementById('range-distance').value);
+            
+            if(maxDist > 0) {
+                filtered = filtered.filter(b => getDistance(userCoords.lat, userCoords.lng, b.lat, b.lng) <= maxDist);
+            }
+
+            if (mode === 'new') {
+                filtered = filtered.filter(b => isNew(b.fecha_creacion));
+                showInPanel(filtered, "Nuevos (Últimos 30 días)");
+            } else if (mode === 'top') {
+                filtered.sort((a, b) => b.rating - a.rating);
+                showInPanel(filtered, "Mejor Valorados");
+            } else if (mode === 'fast') {
+                filtered.sort((a, b) => parseInt(a.time) - parseInt(b.time));
+                showInPanel(filtered, "Más Rápidos");
+            }
+            renderMarkers(filtered);
+        }
+
+        let resultsView = 'list';
+        let _lastPanelData = null;
+        let _lastPanelTitle = '';
+
+        function setResultsView(mode) {
+            if (mode !== 'grid' && mode !== 'list') return;
+            resultsView = mode;
+            const list = document.getElementById('results-list');
+            list.classList.remove('results-grid', 'results-list');
+            list.classList.add(mode === 'grid' ? 'results-grid' : 'results-list');
+            const toggleBtn = document.getElementById('view-toggle-btn');
+            if (toggleBtn) {
+                const icon = toggleBtn.querySelector('i');
+                if (icon) {
+                    icon.classList.toggle('fa-th-large', mode === 'grid');
+                    icon.classList.toggle('fa-list', mode === 'list');
+                }
+            }
+            // reduce panel width a bit when in grid mode to make tiles smaller
+            const panel = document.getElementById('results-panel');
+            if (panel) panel.style.maxWidth = mode === 'grid' ? '520px' : '600px';
+            if (_lastPanelData) showInPanel(_lastPanelData, _lastPanelTitle);
+        }
+
+        function toggleResultsView(btn) {
+            const mode = resultsView === 'grid' ? 'list' : 'grid';
+            setResultsView(mode);
+            // update button icon immediately
+            if (btn) {
+                const icon = btn.querySelector('i');
+                if (icon) {
+                    icon.classList.toggle('fa-th-large', mode === 'grid');
+                    icon.classList.toggle('fa-list', mode === 'list');
+                }
+            }
+        }
+
+        function showInPanel(data, title) {
+            _lastPanelData = data;
+            _lastPanelTitle = title || 'Resultados';
+            document.getElementById('panel-title').innerText = _lastPanelTitle.toUpperCase();
+            const list = document.getElementById('results-list');
+            list.innerHTML = '';
+            // ensure class reflects current view
+            list.classList.remove('results-grid', 'results-list');
+            list.classList.add(resultsView === 'grid' ? 'results-grid' : 'results-list');
+
+            if (!data || data.length === 0) {
+                list.innerHTML = `<p class="text-[10px] text-white/20 uppercase font-black p-4 w-full text-center">No hay negocios en este rango</p>`;
+                document.getElementById('results-panel').classList.add('open');
+                return;
+            }
+
+            data.forEach(biz => {
+                const km = (getDistance(userCoords.lat, userCoords.lng, biz.lat, biz.lng) / 1000).toFixed(1);
+                const isBizNew = isNew(biz.fecha_creacion);
+                const card = document.createElement('div');
+                if (resultsView === 'list') {
+                    card.className = "w-full bg-glotoDark border border-white/5 p-4 rounded-[2rem] cursor-pointer flex items-center gap-4";
+                    card.innerHTML = `
+                        <img src="${biz.img}" class="w-20 h-20 object-cover rounded-xl flex-shrink-0">
+                        <div class="flex-1">
+                            <p class="text-[12px] font-black uppercase text-white truncate">${biz.name}</p>
+                            <p class="text-[9px] text-white/30 font-bold uppercase mt-1">${biz.rating} ★ • ${biz.time}</p>
+                            <p class="text-[9px] text-white/40 mt-2 truncate">${(biz.products||'').substring(0,120)}</p>
+                        </div>
+                        <div class="text-right text-[10px] text-glotoNeon font-black">${km} KM</div>
+                    `;
+                } else {
+                    card.className = "bg-glotoDark border border-white/5 p-0 rounded-[2.5rem] cursor-pointer relative overflow-hidden";
+                        card.innerHTML = `
+                            <div class="grid-img relative">
+                                <img src="${biz.img}" alt="${biz.name}">
+                                ${isBizNew ? '<span class="absolute top-2 left-2 bg-glotoNeon text-black text-[8px] font-black px-3 py-1 rounded-full">NUEVO</span>' : ''}
+                                <div class="overlay">
+                                    <p class="truncate">${biz.name}</p>
+                                    <div style="font-size:11px; color:rgba(255,255,255,0.85);">${biz.rating} ★ • ${biz.time}</div>
+                                </div>
+                            </div>
+                            <div class="grid-meta">
+                                <div class="flex justify-between items-start">
+                                    <p class="text-[10px] font-black uppercase text-white">${biz.name}</p>
+                                    <div class="text-[10px] text-glotoNeon font-black">${km} KM</div>
+                                </div>
+                                <p class="text-[9px] text-white/30 font-bold uppercase">${biz.rating} ★ • ${biz.time}</p>
+                                <div class="products">${biz.products || 'Consultar disponibilidad'}</div>
+                                <div class="text-[9px] text-white/40">Horario: ${biz.hours || 'Consultar'}</div>
+                            </div>`;
+                }
+                card.onclick = () => openQuickView(biz);
+                list.appendChild(card);
+            });
+            document.getElementById('results-panel').classList.add('open');
+        }
+
+        function renderMarkers(data) {
+            activeMarkers.forEach(m => map.removeLayer(m));
+            activeMarkers = [];
+            data.forEach(b => {
+                const m = L.marker([b.lat, b.lng], { icon: L.divIcon({ className: 'custom-marker' }) }).addTo(map).on('click', () => openQuickView(b));
+                activeMarkers.push(m);
+            });
+            // Si hay negocios filtrados, ajustar el mapa para que se vean todos
+            if(data.length > 0 && activeMarkers.length > 0) {
+                const group = new L.featureGroup(activeMarkers);
+                map.fitBounds(group.getBounds().pad(0.3));
+            }
+        }
+
+        function openQuickView(biz) {
+            closeAllPanels();
+            const content = document.getElementById('qv-content');
+            
+            content.innerHTML = `
+                <div class="flex gap-6 items-center mb-6 mt-6">
+                    <div class="relative">
+                        <img src="${biz.img}" class="w-24 h-24 object-cover rounded-[2rem] border-2 border-glotoNeon/20">
+                        ${isNew(biz.fecha_creacion) ? '<span class="absolute -top-2 -right-2 bg-glotoNeon text-black text-[8px] font-black px-3 py-1 rounded-full">NUEVO</span>' : ''}
+                    </div>
+                    <div>
+                        <h3 class="font-logo text-glotoNeon text-2xl leading-none mb-1 ">${biz.name}</h3>
+                        <p class="text-[9px] text-white/40 uppercase font-black">${biz.cat}</p>
+                        <div class="flex items-center gap-2 mt-2">
+                             <span class="bg-glotoNeon/10 text-glotoNeon px-2 py-1 rounded-lg text-[10px] font-black">${biz.rating} ★</span>
+                             <span class="text-[8px] text-white/20 uppercase font-black">Rating Actual</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white/5 p-6 rounded-3xl border border-white/5 mb-6">
+                    <p class="text-[10px] text-glotoNeon font-black uppercase tracking-widest mb-2">¿Que ofrecen?</p>
+                    <p class="text-white/70 text-sm leading-relaxed">${biz.products || 'Consultar disponibilidad'}</p>
+                    <div class="mt-4 flex gap-4 border-t border-white/5 pt-4">
+                         <div><p class="text-[8px] text-white/30 uppercase font-black">Entrega</p><p class="text-[10px] font-bold">${biz.time}</p></div>
+                         <div><p class="text-[8px] text-white/30 uppercase font-black">Horario</p><p class="text-[10px] font-bold">${biz.hours || 'Consultar'}</p></div>
+                    </div>
+                </div>
+
+                <div id="rating-box" class="bg-glotoDark border border-glotoNeon/20 p-5 rounded-3xl text-center transition-all duration-300">
+                    <p id="rating-instruction" class="text-[9px] text-white/50 uppercase font-black mb-4 tracking-widest">Calificanos</p>
+                    <div id="stars-container" class="flex justify-center gap-3" onmouseleave="resetStars()">
+                        <i class="far fa-star star-rating-interactive" data-val="1" onclick="rateBusiness('${biz.id}', 1)" onmouseover="previewStars(1)"></i>
+                        <i class="far fa-star star-rating-interactive" data-val="2" onclick="rateBusiness('${biz.id}', 2)" onmouseover="previewStars(2)"></i>
+                        <i class="far fa-star star-rating-interactive" data-val="3" onclick="rateBusiness('${biz.id}', 3)" onmouseover="previewStars(3)"></i>
+                        <i class="far fa-star star-rating-interactive" data-val="4" onclick="rateBusiness('${biz.id}', 4)" onmouseover="previewStars(4)"></i>
+                        <i class="far fa-star star-rating-interactive" data-val="5" onclick="rateBusiness('${biz.id}', 5)" onmouseover="previewStars(5)"></i>
+                    </div>
+                </div>`;
+
+            document.getElementById('qv-link').href = `https://google.com/search?q=${encodeURIComponent(biz.name)}`;
+            document.getElementById('quick-view').classList.add('open');
+            map.panTo([biz.lat, biz.lng]);
+        }
+
+        function previewStars(val) {
+            const stars = document.querySelectorAll('.star-rating-interactive');
+            stars.forEach((s, i) => {
+                if(i < val) {
+                    s.classList.add('hovered', 'fas');
+                    s.classList.remove('far');
+                } else {
+                    s.classList.remove('hovered', 'fas');
+                    s.classList.add('far');
+                }
+            });
+        }
+
+        function resetStars() {
+            const stars = document.querySelectorAll('.star-rating-interactive');
+            stars.forEach(s => {
+                s.classList.remove('hovered', 'fas');
+                s.classList.add('far');
+            });
+        }
+
+        async function rateBusiness(id, stars) {
+            const ratingBox = document.getElementById('rating-box');
+            const instruction = document.getElementById('rating-instruction');
+            const starsContainer = document.getElementById('stars-container');
+
+            ratingBox.classList.add('rating-disabled');
+            instruction.innerHTML = `<span class="btn-spinner mr-2"></span> ENVIANDO VALORACIÓN...`;
+            instruction.classList.replace('text-white/50', 'text-glotoNeon');
+
+            try {
+                const res = await fetch(API_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: "rate_business", id, stars })
+                });
+                const r = await res.json();
+                
+                if(r.status === "voto_registrado") {
+                    instruction.innerHTML = `<i class="fas fa-check-circle mr-2"></i> CALIFICACIÓN ENVIADA`;
+                    starsContainer.style.display = 'none';
+                    const updatedRes = await fetch(API_URL);
+                    businessData = await updatedRes.json();
+                    renderMarkers(businessData);
+                }
+            } catch(e) { 
+                instruction.innerText = "ERROR AL ENVIAR. INTENTA DE NUEVO.";
+                ratingBox.classList.remove('rating-disabled');
+            }
+        }
+
+        // Actualización en tiempo real del círculo visual y la etiqueta
+        document.getElementById('range-distance').oninput = (e) => {
+            const v = e.target.value;
+            const label = document.getElementById('dist-val');
+            if(v == 0) {
+                label.innerText = "Sin límite";
+                proximityCircle.setRadius(0);
+            } else {
+                label.innerText = v >= 1000 ? (v/1000).toFixed(1) + 'km' : v + 'm';
+                proximityCircle.setRadius(v);
+            }
+        };
+
+        function searchBiz() {
+            const q = document.getElementById('search-input').value.toLowerCase();
+            if(q.length > 2) {
+                closeAllPanels();
+                const filtered = businessData.filter(b => b.name.toLowerCase().includes(q) || b.products.toLowerCase().includes(q));
+                renderMarkers(filtered);
+                showInPanel(filtered, "Resultados");
+            }
+        }
+
+        function locateUser() { closeAllPanels(); map.setView([userCoords.lat, userCoords.lng], 16); }
+        function toggleFiltersModal() { 
+            const modal = document.getElementById('advanced-filters-modal');
+            modal.classList.toggle('hidden');
+        }
+        function closeResults() { document.getElementById('results-panel').classList.remove('open'); }
+        function closeQuickView() { document.getElementById('quick-view').classList.remove('open'); }
+
+        // Alterna modo pantalla completa para un panel (results-panel, quick-view, etc.)
+        function togglePanelFullscreen(panelId, btn) {
+            const panel = document.getElementById(panelId);
+            if (!panel) return;
+            const icon = btn && btn.querySelector && btn.querySelector('i');
+            const entering = !panel.classList.contains('fullscreen-panel');
+            if (entering) {
+                panel.classList.add('fullscreen-panel');
+                if (icon) { icon.classList.remove('fa-expand'); icon.classList.add('fa-compress'); }
+            } else {
+                panel.classList.remove('fullscreen-panel');
+                if (icon) { icon.classList.remove('fa-compress'); icon.classList.add('fa-expand'); }
+            }
+        }
+
+        // Auto-start plaza on load (enter directly to map)
+        document.addEventListener('DOMContentLoaded', () => {
+            requestLocationAndStart();
+        });
+    </script>
+</body>
+</html>
